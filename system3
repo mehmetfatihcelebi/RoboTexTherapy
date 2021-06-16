@@ -1,0 +1,197 @@
+#include <SoftwareSerial.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
+
+#define ONE_WIRE_BUS 7
+// Setup a oneWire instance to communicate with any OneWire devices (not just Maxim/Dallas temperature ICs)
+OneWire oneWire(ONE_WIRE_BUS);
+// Pass our oneWire reference to Dallas Temperature. 
+DallasTemperature sensors(&oneWire);
+
+// Capacitive pressure sensor definitions
+#define avg_cap_mult 16
+//capacitive pressure sensor is between A0 and 8 pins
+int CAP_IN_PIN = A0;
+int CAP_OUT_PIN = 8;
+int capacitance;
+int motor1pin1 = 5;
+int motor1pin2 = 6;
+
+// Mass scales definitions
+SoftwareSerial mySerial(2, 3); // RX, TX
+float mass_flt, mass_flt_raw;
+bool flag;
+
+// Derivative
+double dt = 2.0;
+double e[4], y, u, r = 570;
+double Kp=0.02 , Kd=4.72;
+double firstDerivativeOld;
+double a= 0.1;
+
+void setupTimer1() {
+  noInterrupts();
+  // Clear registers
+  TCCR1A = 0;
+  TCCR1B = 0;
+  TCNT1 = 0;
+
+  // 0.5 Hz (16000000/((31249+1)*1024))
+  OCR1A = 31249;
+  // CTC
+  TCCR1B |= (1 << WGM12);
+  // Prescaler 1024
+  TCCR1B |= (1 << CS12) | (1 << CS10);
+  // Output Compare Match A Interrupt Enable
+  TIMSK1 |= (1 << OCIE1A);
+  interrupts();
+}
+
+void setup()
+{
+  
+  pinMode(motor1pin1, OUTPUT);
+  pinMode(motor1pin2, OUTPUT);
+  
+  
+  digitalWrite(motor1pin2, LOW);
+  
+  // Open serial communications and wait for port to open:
+  mySerial.begin(9600);
+  Serial.begin(9600);
+  while (!Serial); // wait for serial port to connect. Needed for Native USB only
+
+  //capacitive sensor setup
+  pinMode(CAP_OUT_PIN, OUTPUT);
+  pinMode(CAP_IN_PIN, OUTPUT);
+
+  // Start up the DALLAS library
+  sensors.begin(); // IC Default 9 bit. If you have troubles consider upping it 12. Ups the delay giving the IC more time to process the temperature measurement
+
+  //current sensor at A1
+  pinMode(A1, INPUT);
+
+  setupTimer1();
+}
+
+void loop() // run over and over
+{
+  
+}
+
+ISR(TIMER1_COMPA_vect)
+{
+  e[3] = e[2];
+  e[2] = e[1];
+  e[1] = e[0];
+  
+  y = printCapacitance();
+
+  e[0] = r - y;
+
+  if(e > 0)   
+  {
+   double firstDerivative = firstDerive();
+   double firstDerivativeFiltered = a * firstDerivative + (1-a) * firstDerivativeOld; // Low Pass Filtre 
+   u = Kp * e[0] + Kd * firstDerivativeFiltered; // PD kontrol
+   //u *= 100;
+
+  Serial.print("u = ");
+  Serial.println(u);
+  if(u < 0) u=0;         // alt saturasyon
+  if(u > 2000)  u = 2000;  // üst saturasyon
+  u = map(u, 0, 2000, 0, 255); // u degerlerini 0-255 deger aralıgına map
+    
+  analogWrite(motor1pin1, u);
+  
+  firstDerivativeOld = firstDerivative;
+ }
+  
+ else {
+     u = 0; // Cıkısımız referans üzerindeyse kapa 
+    analogWrite(motor1pin1,u);
+  }
+ }
+ 
+ 
+void printMass()
+{
+  String content = "";
+  char character;
+  
+  while (mySerial.available()) {
+    character = mySerial.read();
+    content.concat(character);
+  }
+  
+  String mass_str = "";
+  for(int i = 7; i <= 13; i++){
+    mass_str.concat(content[i]);
+    //if(content[i] <= 57 && content[i] >= 48) flag[i - 7] = true;
+    //else flag[i - 7] = false;
+  }
+
+  mass_flt_raw = mass_str.toFloat();
+  if(content[6] == '-') mass_flt_raw = -1.0 * mass_flt_raw; 
+  mass_flt = mass_flt_raw;
+  Serial.print('#');
+  Serial.println(String(mass_flt));
+}
+
+int printCapacitance()
+{
+  //flush old capacitance value
+  capacitance = 0;
+  // read and sum up the values of each cell of the 
+  // matrix k times to have the average value
+  for (int k = 0; k < avg_cap_mult; k++)
+  {
+    pinMode(CAP_IN_PIN, INPUT);
+    digitalWrite(CAP_OUT_PIN, HIGH);
+    capacitance += analogRead(CAP_IN_PIN);
+    //Clear everything for next measurement
+    digitalWrite(CAP_OUT_PIN, LOW);
+    pinMode(CAP_IN_PIN, OUTPUT); 
+  }
+
+  // divide the integral with k, to have the average value
+  capacitance /= avg_cap_mult; //capacitance = capacitance / avg_cap_mult;
+  
+  Serial.print('%');
+  Serial.println(capacitance);
+  
+  return capacitance;
+}
+
+void printTemperature()
+{
+  sensors.requestTemperatures(); // Send the command to get temperatures
+  Serial.print('$');
+  Serial.println(sensors.getTempCByIndex(0)); // Why "byIndex"? You can have more than one IC on the same bus. 0 refers to the first IC on the wire
+}
+
+void printCurrent()
+{
+  float average = 0;
+  for(int i = 0; i < 256; i++) average = average + (.0264 * analogRead(A1) -13.51);
+  Serial.print('&');
+  Serial.println(average/256);
+}
+
+double thirdDerive()
+{
+  double derive3 = (e[0] - 3 * e[1] + 3 * e[2] - e[3]) / (dt * dt * dt);
+  return derive3;
+}
+
+double secondDerive()
+{
+  double derive2 = (e[0] - 2 * e[1] + e[2]) / (dt * dt);
+  return derive2;
+}
+
+double firstDerive()
+{
+  double derive1 = (e[0] - e[1]) / dt;
+  return derive1;
+}
