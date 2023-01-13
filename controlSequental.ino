@@ -5,19 +5,22 @@ const double IN_EXTRA_CAP_TO_GND = 0.0;
 const double IN_CAP_TO_GND  = IN_STRAY_CAP_TO_GND + IN_EXTRA_CAP_TO_GND;
 const int MAX_ADC_VALUE = 1023;
 
-int IN_PIN[3] = {A0, A1, A2};
-int OUT_PIN[3] = {2, 7, 4};
-int PWM_PIN[3] = {9, 10, 11};
-int GND_PIN[3] = {3, 5, 6};
+//arduino uno pins
+int IN_PIN[3] = {A0, A1, A2}; //{A3, A4, A5} for Lilypad 3 actuator application
+int OUT_PIN[3] = {2, 7, 4}; // {A2, 11, 10} for Lilypad 3 actuator application
+int PWM_PIN[3] = {9, 10, 11}; // {9, 3, 2} for Lilypad 3 actuator application
+int GND_PIN[3] = {3, 5, 6}; // all grounded to - pin for Lilypad 3 actuator application
+
 
 int val_ADC[3];
 double voltage[3];
 double capacitance[3];
 double duty[3] = {1.0, 0.0, 0.0};
 double pressure[3][64], pressureF[3];
+//these parameters vary for each sensor sample
 double capOffset[3] = {15.0, 15.6, 10.36};
 double pressOffset[3] = {9.55, 9.55, 9.55};
-double cap2press[3] = {2.46, 2.46, 1.0};
+double cap2press[3] = {2.46, 2.46, 1.0}; 
 long counter;
 int flag = 0;
 double initial = 0.0;
